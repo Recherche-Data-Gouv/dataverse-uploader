@@ -25,11 +25,14 @@ import java.net.URISyntaxException;
 import java.net.URL;
 import java.text.DecimalFormat;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
-
+import java.util.TreeMap;
+import java.util.Map.Entry;
 import org.apache.http.client.ClientProtocolException;
 import org.apache.http.client.protocol.HttpClientContext;
 import org.json.JSONObject;
@@ -72,6 +75,7 @@ public abstract class AbstractUploader {
     protected boolean listonly = false;
 
     protected Set<String> excluded = new HashSet<String>();
+    protected Map<String, Boolean> excludedDir = new TreeMap<String, Boolean>(Comparator.reverseOrder());
     protected static List<String> requests = new ArrayList<String>();
 
     protected static String server = null;
@@ -142,9 +146,15 @@ public abstract class AbstractUploader {
             } else if (arg.startsWith("-skip")) {
                 skip = Long.parseLong(arg.substring(arg.indexOf(argSeparator) + 1));
                 println("Skip file count: " + skip);
-            } else if (arg.startsWith("-ex")) {
+            } else if (arg.startsWith("-ex=")) {
                 excluded.add(arg.substring(arg.indexOf(argSeparator) + 1));
                 println("Excluding pattern: " + arg.substring(arg.indexOf(argSeparator) + 1));
+            } else if (arg.startsWith("-exdir")) {
+                excludedDir.put(arg.substring(arg.indexOf(argSeparator) + 1), true);
+                println("Excluding directory pattern: " + arg.substring(arg.indexOf(argSeparator) + 1));
+            } else if (arg.startsWith("-indir")) {
+                excludedDir.put(arg.substring(arg.indexOf(argSeparator) + 1), false);
+                println("Including directory pattern: " + arg.substring(arg.indexOf(argSeparator) + 1));
             } else if (arg.startsWith("-server")) {
                 server = arg.substring(arg.indexOf(argSeparator) + 1);
                 println("Using server: " + server);
@@ -299,6 +309,23 @@ System.out.println("tagId: " + tagId);
         return false;
     }
 
+    protected boolean excludedDir(String path) {
+        for (Entry<String, Boolean> e : excludedDir.entrySet()) {
+            String s = e.getKey();
+            boolean isExcluded = e.getValue();
+            if (path.startsWith(s)) {
+                if (isExcluded) {
+                    println("Excluding: " + path);
+                    return true;
+                } else {
+                    println("Including: " + path);
+                    return false;
+                }
+            }
+        }
+        return false;
+    }
+
     protected String uploadCollection(Resource dir, String path, String parentId, String collectionId) {
 
         new HashSet<String>();
@@ -327,6 +354,9 @@ System.out.println("tagId: " + tagId);
             for (Resource file : dir.listResources()) {
 
                 if (excluded(file.getName())) {
+                    continue;
+                }
+                if (!file.isDirectory() && excludedDir(file.getAbsolutePath())) {
                     continue;
                 }
                 String existingUri = null;
