@@ -23,6 +23,7 @@ import java.io.PrintWriter;
 import java.net.MalformedURLException;
 import java.net.URISyntaxException;
 import java.net.URL;
+import java.nio.file.Paths;
 import java.text.DecimalFormat;
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -118,6 +119,16 @@ public abstract class AbstractUploader {
         return;
     }
 
+    /**
+     * Remove all the {@code .} and {@code ..} in the middle of the path string.
+     *
+     * @param path String path of file or directory to be normalized
+     * @return a String representation of the path normalized
+     */
+    public static String normalizePath(String path) {
+        return Paths.get(path).toAbsolutePath().normalize().toString();
+    }
+
     public void parseArgs(String[] args) {
 
         for (String arg : args) {
@@ -150,11 +161,13 @@ public abstract class AbstractUploader {
                 excluded.add(arg.substring(arg.indexOf(argSeparator) + 1));
                 println("Excluding pattern: " + arg.substring(arg.indexOf(argSeparator) + 1));
             } else if (arg.startsWith("-exdir")) {
-                excludedDir.put(arg.substring(arg.indexOf(argSeparator) + 1), true);
-                println("Excluding directory pattern: " + arg.substring(arg.indexOf(argSeparator) + 1));
+                String absolutePathArg = normalizePath(arg.substring(arg.indexOf(argSeparator) + 1));
+                excludedDir.put(absolutePathArg, true);
+                println("Excluding directory pattern: " + absolutePathArg);
             } else if (arg.startsWith("-indir")) {
-                excludedDir.put(arg.substring(arg.indexOf(argSeparator) + 1), false);
-                println("Including directory pattern: " + arg.substring(arg.indexOf(argSeparator) + 1));
+                String absolutePathArg = normalizePath(arg.substring(arg.indexOf(argSeparator) + 1));
+                excludedDir.put(absolutePathArg, false);
+                println("Including directory pattern: " + absolutePathArg);
             } else if (arg.startsWith("-server")) {
                 server = arg.substring(arg.indexOf(argSeparator) + 1);
                 println("Using server: " + server);
@@ -310,10 +323,11 @@ System.out.println("tagId: " + tagId);
     }
 
     protected boolean excludedDir(String path) {
+        final String absolutePath = normalizePath(path);
         for (Entry<String, Boolean> e : excludedDir.entrySet()) {
             String s = e.getKey();
             boolean isExcluded = e.getValue();
-            if (path.startsWith(s)) {
+            if (absolutePath.startsWith(s)) {
                 if (isExcluded) {
                     println("Excluding: " + path);
                     return true;
