@@ -966,7 +966,7 @@ public class DVUploader extends AbstractUploader {
         while (retries > 0) {        
         // Start multipart upload with a call to Dataverse. It will make a call to S3 to start the multipart upload and will return a set of presigned Urls for us to upload the parts
         String urlString = server + "/api/datasets/:persistentId/uploadurls";
-        urlString = urlString + "?persistentId=doi:" + datasetPID.substring(4) + "&key=" + apiKey + "&size=" + file.length();
+        urlString = urlString + "?persistentId=" + datasetPID + "&key=" + apiKey + "&size=" + file.length();
         HttpGet httpget = new HttpGet(urlString);
         CloseableHttpResponse response = httpclient.execute(httpget, getLocalContext());
             try {
