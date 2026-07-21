@@ -154,7 +154,7 @@ public class DVUploader extends AbstractUploader {
 
     private static void usage() {
         println("\nUsage:");
-        println("  java -jar DVUploader-1.2.0.jar -server=<serverURL> -key=<apikey> -did=<dataset DOI> <files or directories>");
+        println("  java -jar DVUploader-v1.4.0.jar -server=<serverURL> -key=<apikey> -did=<dataset DOI> <files or directories>");
 
         println("\n  where:");
         println("      <serverUrl> = the URL of the server to upload to, e.g. https://datverse.tdl.org");

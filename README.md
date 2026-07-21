@@ -19,6 +19,14 @@ For Clowder/SEAD-specific information, see https://opensource.ncsa.illinois.edu/
 
 Build:
 
- mvn clean compile assembly:single
- 
- Usage: See wiki: https://github.com/GlobalDataverseCommunityConsortium/dataverse-uploader/wiki/DVUploader,-a-Command-line-Bulk-Uploader-for-Dataverse
+Run the following command to build the project and create the executable JAR:
+
+```bash
+mvn clean package -DskipTests
+```
+
+This will produce:
+- `target/DVUploader-1.4.0.jar`: Standard library JAR.
+- `target/DVUploader-v1.4.0.jar`: Executable "fat" JAR containing all dependencies.
+
+Usage: See wiki: https://github.com/GlobalDataverseCommunityConsortium/dataverse-uploader/wiki/DVUploader,-a-Command-line-Bulk-Uploader-for-Dataverse
