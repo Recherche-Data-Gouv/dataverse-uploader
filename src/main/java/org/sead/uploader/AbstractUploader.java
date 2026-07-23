@@ -126,7 +126,11 @@ public abstract class AbstractUploader {
     public void parseArgs(String[] args) {
 
         for (String arg : args) {
-            // println("Arg is : " + arg);
+            if (arg.startsWith("-key" + argSeparator)) {
+                println("Arg is : -key" + argSeparator + "MASKED");
+            } else {
+                println("Arg is : " + arg);
+            }
             if (arg.equalsIgnoreCase("-listonly")) {
                 listonly = true;
                 println("List Only Mode");

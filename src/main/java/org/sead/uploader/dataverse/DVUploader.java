@@ -186,7 +186,7 @@ public class DVUploader extends AbstractUploader {
 
         if (arg.startsWith("-key")) {
             apiKey = arg.substring(arg.indexOf(argSeparator) + 1);
-            println("Using apiKey: " + apiKey);
+            println("Using apiKey: MASKED");
             return true;
         } else if (arg.startsWith("-did")) {
             datasetPID = arg.substring(arg.indexOf(argSeparator) + 1);
