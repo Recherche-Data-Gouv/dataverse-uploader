@@ -322,6 +322,21 @@ public class DVUploader extends AbstractUploader {
     public void clearCache() {
         datasetMDRetrieved = false;
         existingItems = null;
+        hashIssues.clear();
+        apiKey = null;
+        datasetPID = null;
+        alias = null;
+        oldServer = false;
+        maxWaitTime = 60;
+        recurse = false;
+        directUpload = true;
+        trustCerts = false;
+        singleFile = false;
+        noIngest = false;
+        fixNames = true;
+        httpclient = null;
+        cm = null;
+        fixityAlgorithm = "MD5";
     }
 
     private boolean datasetMDRetrieved = false;
