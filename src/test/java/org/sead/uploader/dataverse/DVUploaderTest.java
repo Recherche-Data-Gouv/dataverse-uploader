@@ -14,11 +14,13 @@ import org.sead.uploader.util.UploaderException;
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.IOException;
+import java.io.OutputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Properties;
+import java.util.stream.Stream;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -33,6 +35,7 @@ public class DVUploaderTest {
     private String server;
     private String apiKey;
     private String datasetPID;
+    private long partSize;
     private DVUploader uploader;
 
     @BeforeAll
@@ -48,6 +51,13 @@ public class DVUploaderTest {
         server = System.getProperty("dataverse.server", props.getProperty("dataverse.server", System.getenv("DATAVERSE_SERVER")));
         apiKey = System.getProperty("dataverse.api_key", props.getProperty("dataverse.api_key", System.getenv("DATAVERSE_API_KEY")));
         datasetPID = System.getProperty("dataverse.dataset_pid", props.getProperty("dataverse.dataset_pid", System.getenv("DATAVERSE_DATASET_PID")));
+        
+        String partSizeStr = System.getProperty("dataverse.part_size", props.getProperty("dataverse.part_size", System.getenv("DATAVERSE_PART_SIZE")));
+        if (partSizeStr != null) {
+            partSize = Long.parseLong(partSizeStr);
+        } else {
+            partSize = 5 * 1024 * 1024; // Default 5MB
+        }
 
         // Skip tests if configuration is missing
         Assumptions.assumeTrue(server != null && apiKey != null && datasetPID != null,
@@ -156,11 +166,23 @@ public class DVUploaderTest {
 
     @Test
     public void testLargeFileUpload() throws IOException, UploaderException {
-        // Create a > 5MB file to trigger multipart upload
+        System.out.println("Using part size: " + partSize);
+        // Create a file slightly larger than partSize to trigger multipart upload
+        long fileSize = partSize + (1024 * 1024); // partSize + 1 MB
+        
         Path largeFile = Files.createTempFile("dvuploader-large", ".bin");
         String filename = largeFile.getFileName().toString();
-        byte[] data = new byte[6 * 1024 * 1024]; // 6 MB
-        Files.write(largeFile, data);
+        
+        System.out.println("Creating " + fileSize + " bytes temp file: " + filename);
+        try (OutputStream os = Files.newOutputStream(largeFile)) {
+            byte[] buffer = new byte[1024 * 1024]; // 1MB buffer
+            long written = 0;
+            while (written < fileSize) {
+                int toWrite = (int) Math.min(buffer.length, fileSize - written);
+                os.write(buffer, 0, toWrite);
+                written += toWrite;
+            }
+        }
         
         try {
             uploader.parseArgs(new String[]{largeFile.toAbsolutePath().toString()});
@@ -169,6 +191,71 @@ public class DVUploaderTest {
         } finally {
             Files.deleteIfExists(largeFile);
         }
+    }
+
+    @Test
+    public void testDirectoryTreeUploadWithLimit() throws IOException, UploaderException {
+        Path tempDir = Files.createTempDirectory("dvuploader-test-tree");
+        try {
+            Path file1 = Files.createFile(tempDir.resolve("dvuploader-test-tree1.txt"));
+            Files.writeString(file1, "File 1 content");
+            Path subDir = Files.createDirectory(tempDir.resolve("subdir"));
+            Path file2 = Files.createFile(subDir.resolve("dvuploader-test-tree2.txt"));
+            Files.writeString(file2, "File 2 content");
+            Path file3 = Files.createFile(subDir.resolve("dvuploader-test-tree3.txt"));
+            Files.writeString(file3, "File 3 content");
+
+            String[] filenames = {
+                file1.getFileName().toString(),
+                file2.getFileName().toString(),
+                file3.getFileName().toString()
+            };
+
+            // Run 1: limit = 1, recurse
+            System.out.println("Run 1: limit=1");
+            uploader.parseArgs(new String[]{"-limit=1", "-recurse", tempDir.toAbsolutePath().toString()});
+            uploader.processRequests();
+            
+            int count = countFilesFromSet(filenames);
+            assertEquals(1, count, "Should have exactly 1 file uploaded in first run");
+
+            // Run 2: no limit, recurse
+            System.out.println("Run 2: full upload");
+            uploader.clearRequests();
+            uploader.parseArgs(new String[]{"-server=" + server, "-key=" + apiKey, "-did=" + datasetPID}); // Re-add common args
+            uploader.parseArgs(new String[]{"-recurse", tempDir.toAbsolutePath().toString()});
+            uploader.processRequests();
+
+            count = countFilesFromSet(filenames);
+            assertEquals(3, count, "Should have all 3 files uploaded after second run");
+
+        } finally {
+            deleteDirectory(tempDir);
+        }
+    }
+
+
+    private int countFilesFromSet(String[] filenames) throws IOException {
+        int count = 0;
+        for (String f : filenames) {
+            if (isFileInDataset(f)) count++;
+        }
+        return count;
+    }
+
+    private void deleteDirectory(Path path) throws IOException {
+        if (Files.isDirectory(path)) {
+            try (Stream<Path> entries = Files.list(path)) {
+                entries.forEach(p -> {
+                    try {
+                        deleteDirectory(p);
+                    } catch (IOException e) {
+                        e.printStackTrace();
+                    }
+                });
+            }
+        }
+        Files.deleteIfExists(path);
     }
 
     private boolean isFileInDataset(String filename) throws IOException {

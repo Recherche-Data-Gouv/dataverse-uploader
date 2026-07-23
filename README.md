@@ -34,7 +34,7 @@ Testing:
 Basic functionality tests for Dataverse can be run using Maven. These tests require a live Dataverse instance and valid credentials.
 
 1. Copy `test.properties.example` to `test.properties`.
-2. Edit `test.properties` and provide your Dataverse server URL, API key, and a test Dataset PID (DOI).
+2. Edit `test.properties` and provide your Dataverse server URL, API key, a test Dataset PID (DOI), and the part size for multipart uploads.
 3. Run the tests:
 ```bash
 mvn test

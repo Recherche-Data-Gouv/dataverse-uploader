@@ -76,6 +76,21 @@ public abstract class AbstractUploader {
 
     public void clearRequests() {
         requests.clear();
+        max = Long.MAX_VALUE;
+        skip = 0l;
+        globalFileCount = 0l;
+        totalBytes = 0l;
+        listonly = false;
+        verify = false;
+        importRO = false;
+        merge = true;
+        excluded.clear();
+        hashIssues.clear();
+        roDataIdToNewId.clear();
+        roCollIdToNewId.clear();
+        roFolderProxy.clear();
+        server = null;
+        bagLocation = null;
         clearCache();
     }
 
