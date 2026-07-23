@@ -74,6 +74,15 @@ public abstract class AbstractUploader {
     protected Set<String> excluded = new HashSet<String>();
     protected static List<String> requests = new ArrayList<String>();
 
+    public void clearRequests() {
+        requests.clear();
+        clearCache();
+    }
+
+    public void clearCache() {
+        // To be overridden by subclasses to clear internal caches
+    }
+
     protected static String server = null;
 
     PrintWriter pw = null;

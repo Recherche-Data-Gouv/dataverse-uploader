@@ -318,8 +318,14 @@ public class DVUploader extends AbstractUploader {
         return httpclient;
     }
 
+    @Override
+    public void clearCache() {
+        datasetMDRetrieved = false;
+        existingItems = null;
+    }
+
+    private boolean datasetMDRetrieved = false;
     HashMap<String, JSONObject> existingItems = null;
-    boolean datasetMDRetrieved = false;
 
     CloseableHttpClient httpclient = null;
 
@@ -1000,8 +1006,8 @@ public class DVUploader extends AbstractUploader {
                             MessageDigest messageDigest = MessageDigest.getInstance(fixityAlgorithm);
 
                             try (InputStream inStream = file.getInputStream(); DigestInputStream digestInputStream = new DigestInputStream(inStream, messageDigest)) {
-                                // This is hte new form for requests - keeping the example but won't update until we can change all
-                                //HttpUriRequest httpput = RequestBuilder.put()
+                                // This is the new form for requests - keeping the example but won't update until we can change all
+                                // HttpUriRequest httpput = RequestBuilder.put()
                                 //    .setUri(uploadUrl)
                                 //    .setHeader("x-amz-tagging", "dv-state=temp")
                                 //    .setEntity(new InputStreamEntity(digestInputStream, file.length()))

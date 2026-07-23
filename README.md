@@ -29,4 +29,20 @@ This will produce:
 - `target/DVUploader-1.4.0.jar`: Standard library JAR.
 - `target/DVUploader-v1.4.0.jar`: Executable "fat" JAR containing all dependencies.
 
+Testing:
+
+Basic functionality tests for Dataverse can be run using Maven. These tests require a live Dataverse instance and valid credentials.
+
+1. Copy `test.properties.example` to `test.properties`.
+2. Edit `test.properties` and provide your Dataverse server URL, API key, and a test Dataset PID (DOI).
+3. Run the tests:
+```bash
+mvn test
+```
+
+Alternatively, you can provide configuration via system properties or environment variables:
+```bash
+mvn test -Ddataverse.server=... -Ddataverse.api_key=... -Ddataverse.dataset_pid=...
+```
+
 Usage: See wiki: https://github.com/GlobalDataverseCommunityConsortium/dataverse-uploader/wiki/DVUploader,-a-Command-line-Bulk-Uploader-for-Dataverse
