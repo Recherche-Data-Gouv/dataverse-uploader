@@ -234,8 +234,6 @@ public abstract class AbstractUploader {
                                     // the
                                     // collection
                                     postProcessCollection();
-                                } else {
-                                    postProcessChildren(file);
                                 }
                             } else {
                                 newUri = null; // listonly - report no changes
