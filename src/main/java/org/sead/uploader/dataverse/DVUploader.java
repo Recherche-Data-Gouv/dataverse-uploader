@@ -50,6 +50,7 @@ import javax.net.ssl.SSLContext;
 
 import org.apache.commons.codec.binary.Hex;
 import org.apache.http.HttpEntity;
+import org.apache.http.HttpEntityEnclosingRequest;
 import org.apache.http.client.ClientProtocolException;
 import org.apache.http.client.config.CookieSpecs;
 import org.apache.http.client.config.RequestConfig;
@@ -107,6 +108,13 @@ public class DVUploader extends AbstractUploader {
 
     private int timeout = 1200;
     private int httpConcurrency = 4;
+
+    private static int uploadUrlMaxRetries = 5;
+    private static int uploadUrlBaseRetryDelayMs = 2000;
+    private static int uploadUrlMaxRetryDelayMs = 60000;
+    private static long uploadUrlCooldownUntil = 0;
+    private static int uploadUrlInterRequestDelayMs = 0;
+    private static long lastUploadUrlRequestTimestamp = 0;
 
     //private static long mpSizeLimit = 5 * 1024 * 1024;
     private RequestConfig config = RequestConfig.custom()
@@ -254,7 +262,7 @@ public class DVUploader extends AbstractUploader {
                 String serviceUrl = server + "/api/files/fixityAlgorithm";
                 HttpGet httpget = new HttpGet(serviceUrl);
 
-                CloseableHttpResponse response = httpclient.execute(httpget, getLocalContext());
+                CloseableHttpResponse response = executeWithRetry(httpget, httpclient, getLocalContext());
                  try {
                     switch (response.getStatusLine().getStatusCode()) {
                         case 200:
@@ -302,6 +310,107 @@ public class DVUploader extends AbstractUploader {
         return new HttpClientContext();
     }
 
+    private static synchronized void updateUploadUrlCooldown(long delayMs) {
+        uploadUrlCooldownUntil = Math.max(uploadUrlCooldownUntil, System.currentTimeMillis() + delayMs);
+    }
+
+    private static synchronized void recordUploadUrlRequest() {
+        lastUploadUrlRequestTimestamp = System.currentTimeMillis();
+    }
+
+    private static synchronized void waitForUploadUrlCooldown() {
+        long now = System.currentTimeMillis();
+        long waitTime = Math.max(uploadUrlCooldownUntil - now, (lastUploadUrlRequestTimestamp + uploadUrlInterRequestDelayMs) - now);
+        if (waitTime > 0) {
+            try {
+                // println("Waiting for cooldown: " + waitTime + "ms");
+                Thread.sleep(waitTime);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+        }
+    }
+
+    private static long getRetryAfterDelayMs(CloseableHttpResponse response) {
+        org.apache.http.Header header = response.getFirstHeader("Retry-After");
+        if (header != null) {
+            try {
+                // Can be a number of seconds or an HTTP-date
+                String value = header.getValue();
+                if (value.matches("\\d+")) {
+                    return Long.parseLong(value) * 1000;
+                }
+                // Handle HTTP-date if necessary, but most APIs use seconds
+            } catch (Exception e) {
+                // Ignore
+            }
+        }
+        return 0;
+    }
+
+    public static CloseableHttpResponse executeWithRetry(org.apache.http.client.methods.HttpUriRequest request, CloseableHttpClient client, HttpClientContext context) throws IOException {
+        int retryCount = 0;
+        while (true) {
+            boolean isDatasetApi = request.getURI().getPath().contains("/api/datasets");
+            if (isDatasetApi) {
+                waitForUploadUrlCooldown();
+                recordUploadUrlRequest();
+            }
+
+            CloseableHttpResponse response = client.execute(request, context);
+            int status = response.getStatusLine().getStatusCode();
+
+            if (isDatasetApi && status == 429 && retryCount < uploadUrlMaxRetries) {
+                long retryAfterDelayMs = getRetryAfterDelayMs(response);
+                long recoveryDelayMs = Math.max(
+                        retryAfterDelayMs,
+                        Math.min(uploadUrlBaseRetryDelayMs * (long) Math.pow(2, retryCount), (long) uploadUrlMaxRetryDelayMs)
+                );
+
+                synchronized (DVUploader.class) {
+                    uploadUrlInterRequestDelayMs += 50;
+                }
+                updateUploadUrlCooldown(recoveryDelayMs);
+
+                EntityUtils.consumeQuietly(response.getEntity());
+                response.close();
+
+                println("Retrying call to " + request.getURI() + " due to 429 in " + recoveryDelayMs + "ms (attempt " + (retryCount + 1) + " of " + uploadUrlMaxRetries + ")");
+                try {
+                    Thread.sleep(recoveryDelayMs);
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    throw new IOException("Interrupted during retry wait", e);
+                }
+                retryCount++;
+                continue;
+            }
+
+            if (!isDatasetApi && status >= 500 && status <= 599 && retryCount < 3) {
+                HttpEntity entity = (request instanceof HttpEntityEnclosingRequest) ? ((HttpEntityEnclosingRequest) request).getEntity() : null;
+                if (entity == null || entity.isRepeatable()) {
+                    long baseDelay = 100;
+                    long delay = retryCount == 0 ? baseDelay : baseDelay * (long) Math.pow(2, retryCount);
+
+                    EntityUtils.consumeQuietly(response.getEntity());
+                    response.close();
+
+                    println("Retrying call to " + request.getURI() + " due to " + status + " in " + delay + "ms (attempt " + (retryCount + 1) + " of 3)");
+                    try {
+                        Thread.sleep(delay);
+                    } catch (InterruptedException e) {
+                        Thread.currentThread().interrupt();
+                        throw new IOException("Interrupted during retry wait", e);
+                    }
+                    retryCount++;
+                    continue;
+                }
+            }
+
+            return response;
+        }
+    }
+
     public CloseableHttpClient getSharedHttpClient() {
         if (httpclient == null) {
             try {
@@ -337,6 +446,18 @@ public class DVUploader extends AbstractUploader {
         httpclient = null;
         cm = null;
         fixityAlgorithm = "MD5";
+
+        // Reset retry configuration to defaults
+        // These can't be changed via command line currently but are setable if DVUploader is used as a library (as in tests)
+        uploadUrlMaxRetries = 5;
+        uploadUrlBaseRetryDelayMs = 2000;
+        uploadUrlMaxRetryDelayMs = 60000;
+
+        // Note: We intentionally do NOT reset uploadUrlCooldownUntil,
+        // uploadUrlInterRequestDelayMs, and lastUploadUrlRequestTimestamp here.
+        // These values represent the current rate-limiting state of the Dataverse
+        // server and should persist across cache clears (e.g., between tests) 
+        // to avoid hitting rate limits repeatedly in a short time window.
     }
 
     private boolean datasetMDRetrieved = false;
@@ -386,7 +507,7 @@ public class DVUploader extends AbstractUploader {
                         + "&persistentId=" + datasetPID;
                 HttpGet httpget = new HttpGet(serviceUrl);
 
-                CloseableHttpResponse response = httpclient.execute(httpget, getLocalContext());
+                CloseableHttpResponse response = executeWithRetry(httpget, httpclient, getLocalContext());
                 JSONArray datafileList = null;
                 try {
                     switch (response.getStatusLine().getStatusCode()) {
@@ -558,7 +679,7 @@ public class DVUploader extends AbstractUploader {
             httppost.setEntity(se);
             httppost.addHeader("Content-Type","application/json-ld");
 
-            CloseableHttpResponse response = httpclient.execute(httppost, getLocalContext());
+            CloseableHttpResponse response = executeWithRetry(httppost, httpclient, getLocalContext());
             try {
                 if (response.getStatusLine().getStatusCode() == 201) {
                     HttpEntity resEntity = response.getEntity();
@@ -631,7 +752,7 @@ public class DVUploader extends AbstractUploader {
                 HttpEntity reqEntity = meb.build();
                 httppost.setEntity(reqEntity);
                 try {
-                    CloseableHttpResponse postResponse = httpclient.execute(httppost, getLocalContext());
+                    CloseableHttpResponse postResponse = executeWithRetry(httppost, httpclient, getLocalContext());
 
                     int postStatus = postResponse.getStatusLine().getStatusCode();
                     String postRes = null;
@@ -651,6 +772,15 @@ public class DVUploader extends AbstractUploader {
                             if (fileResult.has("error Code: ")) {
                                 errArray.put(fileResult);
                                 errIds.add(fileResult.getString("storageIdentifier"));
+                            } else {
+                                // Successfully added - clear metadata to avoid re-registration
+                                for (Resource r : dir.listResources()) {
+                                    if (!r.isDirectory() && r.getMetadata().has("storageIdentifier") &&
+                                        r.getMetadata().getString("storageIdentifier").equals(fileResult.getString("storageIdentifier"))) {
+                                        r.setMetadata(new org.json.JSONObject());
+                                        break;
+                                    }
+                                }
                             }
                         }
                         println((jsonData.length() - errIds.size()) + " files successfully added from this folder");
@@ -743,7 +873,7 @@ public class DVUploader extends AbstractUploader {
 
                 httppost.setEntity(body);
 
-                CloseableHttpResponse response = httpclient.execute(httppost, getLocalContext());
+                CloseableHttpResponse response = executeWithRetry(httppost, httpclient, getLocalContext());
 
                 int status = response.getStatusLine().getStatusCode();
                 String res = null;
@@ -858,7 +988,7 @@ public class DVUploader extends AbstractUploader {
                     HttpEntity reqEntity = meb.build();
                     httppost.setEntity(reqEntity);
 
-                    CloseableHttpResponse response = httpclient.execute(httppost, getLocalContext());
+                    CloseableHttpResponse response = executeWithRetry(httppost, httpclient, getLocalContext());
                     try {
                         int status = response.getStatusLine().getStatusCode();
                         String res = null;
@@ -930,7 +1060,7 @@ public class DVUploader extends AbstractUploader {
             urlString = urlString + "?persistentId=" + datasetPID + "&key=" + apiKey;
             HttpGet httpget = new HttpGet(urlString);
 
-            CloseableHttpResponse response = httpclient.execute(httpget, getLocalContext());
+            CloseableHttpResponse response = executeWithRetry(httpget, httpclient, getLocalContext());
             try {
                 if (response.getStatusLine().getStatusCode() == 200) {
                     HttpEntity resEntity = response.getEntity();
@@ -989,7 +1119,7 @@ public class DVUploader extends AbstractUploader {
         String urlString = server + "/api/datasets/:persistentId/uploadurls";
         urlString = urlString + "?persistentId=" + datasetPID + "&key=" + apiKey + "&size=" + file.length();
         HttpGet httpget = new HttpGet(urlString);
-        CloseableHttpResponse response = httpclient.execute(httpget, getLocalContext());
+        CloseableHttpResponse response = executeWithRetry(httpget, httpclient, getLocalContext());
             try {
                 int status = response.getStatusLine().getStatusCode();
 
@@ -1028,7 +1158,7 @@ public class DVUploader extends AbstractUploader {
                                 //    .setEntity(new InputStreamEntity(digestInputStream, file.length()))
                                 //    .build();
                                 httpput.setEntity(new InputStreamEntity(digestInputStream, file.length()));
-                                CloseableHttpResponse putResponse = httpclient.execute(httpput);
+                                CloseableHttpResponse putResponse = executeWithRetry(httpput, httpclient, getLocalContext());
                                 try {
                                     int putStatus = putResponse.getStatusLine().getStatusCode();
                                     String putRes = null;
@@ -1165,7 +1295,7 @@ public class DVUploader extends AbstractUploader {
                             completeUpload.setEntity(body);
                             completeUpload.setHeader("Content-type", "application/json");
 
-                            response = httpclient.execute(completeUpload, getLocalContext());
+                            response = executeWithRetry(completeUpload, httpclient, getLocalContext());
                             EntityUtils.consumeQuietly(response.getEntity());
                             status = response.getStatusLine().getStatusCode();
                             if (status == 200) {
@@ -1201,7 +1331,7 @@ public class DVUploader extends AbstractUploader {
                             retries = 0;
                         } else {
                             HttpDelete delete = new HttpDelete(server + abortUrl + "&key=" + apiKey);
-                            response = httpclient.execute(delete, getLocalContext());
+                            response = executeWithRetry(delete, httpclient, getLocalContext());
                             EntityUtils.consumeQuietly(response.getEntity());
                             status = response.getStatusLine().getStatusCode();
                             if (status != 204) {
@@ -1278,7 +1408,7 @@ public class DVUploader extends AbstractUploader {
             HttpEntity reqEntity = meb.build();
             httppost.setEntity(reqEntity);
             try {
-                CloseableHttpResponse postResponse = httpclient.execute(httppost, getLocalContext());
+                CloseableHttpResponse postResponse = executeWithRetry(httppost, httpclient, getLocalContext());
 
                 int postStatus = postResponse.getStatusLine().getStatusCode();
                 String postRes = null;
