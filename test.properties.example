@@ -1,0 +1,7 @@
+# Dataverse Test Configuration
+# Copy this file to test.properties and fill in the values
+dataverse.server=https://demo.dataverse.org
+dataverse.api_key=YOUR_API_KEY
+dataverse.dataset_pid=doi:10.5072/FK2/XXXXXX
+# Part size for multipart upload in bytes (e.g. 5242880 for 5MB)
+dataverse.part_size=5242880

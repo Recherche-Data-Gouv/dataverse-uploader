@@ -63,17 +63,18 @@ public class HttpPartUploadJob implements Runnable {
 	 * @see java.lang.Runnable#run()
      */
     public void run() {
-        int retries = 3;
+        int retryCount = 0;
+        int maxRetries = 3;
         //println("Starting upload of part: " + partNo);
-        while (retries > 0) {
-            if(retries <3) {
-                println("Retrying upload of part: " + partNo);
+        while (retryCount < maxRetries) {
+            if (retryCount > 0) {
+                println("Retrying upload of part: " + partNo + " (attempt " + (retryCount + 1) + " of " + maxRetries + ")");
             }
             try (InputStream is = file.getInputStream((partNo - 1) * partSize, size)) {
 
                 HttpPut httpput = new HttpPut(signedUrl);
                 httpput.setEntity(new InputStreamEntity(is, size));
-                CloseableHttpResponse putResponse = httpClient.execute(httpput);
+                CloseableHttpResponse putResponse = DVUploader.executeWithRetry(httpput, httpClient, localContext);
                 int putStatus = putResponse.getStatusLine().getStatusCode();
                 String putRes = null;
                 HttpEntity putEntity = putResponse.getEntity();
@@ -83,27 +84,32 @@ public class HttpPartUploadJob implements Runnable {
                 if (putStatus == 200) {
                     //Part successfully stored - parse the eTag from the response and it it to the Map
                     String eTag = putResponse.getFirstHeader("ETag").getValue();
-                    eTag= eTag.replace("\"","");
+                    eTag = eTag.replace("\"", "");
                     eTags.put(Integer.toString(partNo), eTag);
-                    retries = 0;
-                    //println("Completed upload of part: " + partNo);
+                    return;
                 } else {
-                    if (putStatus >= 500) {
-                        println("Upload of part: " + partNo + " failed with status: " + putStatus + " (skipping)");
+                    if (putStatus >= 500 && putStatus <= 599) {
+                        long baseDelay = 100;
+                        long delay = retryCount == 0 ? baseDelay : baseDelay * (long) Math.pow(2, retryCount);
+                        println("Upload of part: " + partNo + " failed with status: " + putStatus + ". Retrying in " + delay + "ms");
                         println("Error response: " + putResponse.getStatusLine() + " : " + putRes);
-                        retries--;
+                        try {
+                            Thread.sleep(delay);
+                        } catch (InterruptedException e) {
+                            Thread.currentThread().interrupt();
+                        }
+                        retryCount++;
                     } else {
                         println("Upload of part: " + partNo + " failed with status: " + putStatus + " (retrying)");
                         println("Error response: " + putResponse.getStatusLine() + " : " + putRes);
-
-                        retries--;
+                        retryCount++;
                     }
                 }
 
             } catch (IOException e) {
                 e.printStackTrace(System.out);
                 println("Error uploading part: " + partNo + " : " + e.getMessage());
-                retries--;
+                retryCount++;
             }
         }
     }

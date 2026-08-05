@@ -74,6 +74,30 @@ public abstract class AbstractUploader {
     protected Set<String> excluded = new HashSet<String>();
     protected static List<String> requests = new ArrayList<String>();
 
+    public void clearRequests() {
+        requests.clear();
+        max = Long.MAX_VALUE;
+        skip = 0l;
+        globalFileCount = 0l;
+        totalBytes = 0l;
+        listonly = false;
+        verify = false;
+        importRO = false;
+        merge = true;
+        excluded.clear();
+        hashIssues.clear();
+        roDataIdToNewId.clear();
+        roCollIdToNewId.clear();
+        roFolderProxy.clear();
+        server = null;
+        bagLocation = null;
+        clearCache();
+    }
+
+    public void clearCache() {
+        // To be overridden by subclasses to clear internal caches
+    }
+
     protected static String server = null;
 
     PrintWriter pw = null;
@@ -117,7 +141,11 @@ public abstract class AbstractUploader {
     public void parseArgs(String[] args) {
 
         for (String arg : args) {
-            // println("Arg is : " + arg);
+            if (arg.startsWith("-key" + argSeparator)) {
+                println("Arg is : -key" + argSeparator + "MASKED");
+            } else {
+                println("Arg is : " + arg);
+            }
             if (arg.equalsIgnoreCase("-listonly")) {
                 listonly = true;
                 println("List Only Mode");
@@ -206,8 +234,6 @@ public abstract class AbstractUploader {
                                     // the
                                     // collection
                                     postProcessCollection();
-                                } else {
-                                    postProcessChildren(file);
                                 }
                             } else {
                                 newUri = null; // listonly - report no changes
